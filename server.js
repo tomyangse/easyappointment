@@ -1,4 +1,12 @@
-// 引入所需的库
+async function callGeminiAPI(imageBuffer) {
+  try {
+    const imageBase64 = imageBuffer.toString('base64');
+    const apiKey = process.env.GEMINI_API_KEY;
+    // 修复：将模型名称更新为 'gemini-1.5-flash-latest' 来解决 404 错误
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+
+    console.log('正在调用 Gemini API...');
+
 const express = require('express');
 const multer = require('multer');
 const { google } = require('googleapis');
@@ -130,6 +138,7 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
 
 
