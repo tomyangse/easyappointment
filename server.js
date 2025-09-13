@@ -4,7 +4,7 @@ const { google } = require('googleapis');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
-const cookieSession = require('cookie-session'); // 替换为 cookie-session
+const cookieSession = require('cookie-session');
 require('dotenv').config();
 
 // --- 应用程序设置 ---
@@ -30,14 +30,16 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- Cookie-Session 配置 (最终解决方案) ---
+// --- Cookie-Session 配置 ---
+app.set('trust proxy', 1); // 在 Vercel 这样的代理环境下需要此设置
 app.use(
   cookieSession({
     name: 'easyappointment-session',
-    secret: process.env.SESSION_SECRET, // 用于加密 cookie
+    secret: process.env.SESSION_SECRET,
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000 // session 有效期 24 小时
+    secure: true, // 强制要求 HTTPS
+    sameSite: 'lax', // 增强安全性
+    maxAge: 24 * 60 * 60 * 1000
   })
 );
 
@@ -66,7 +68,7 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    req.session.tokens = tokens; // 将 token 直接存入加密的 cookie
+    req.session.tokens = tokens;
     console.log('成功获取 Token 并存入 Cookie Session');
     res.redirect('/?loginsuccess=true');
   } catch (error) {
@@ -76,7 +78,14 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.post('/api/create-event-from-image', upload.single('eventImage'), async (req, res) => {
-  if (!req.session.tokens) {
+  // --- 新增的详细诊断日志 ---
+  console.log('--- 开始处理 /api/create-event-from-image 请求 ---');
+  console.log('请求头中的 Cookie:', req.headers.cookie || '未找到 Cookie');
+  console.log('解析后的 Session 对象:', JSON.stringify(req.session, null, 2));
+  // --- 诊断日志结束 ---
+
+  if (!req.session || !req.session.tokens) {
+    console.error('授权检查失败：Session 中未找到 tokens。');
     return res.status(401).json({ message: '用户未授权。请刷新页面并重新登录。' });
   }
 
