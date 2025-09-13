@@ -15,12 +15,20 @@ app.post('/api/create-event-from-voice', upload.single('eventAudio'), async (req
         const geminiApiKey = process.env.GEMINI_API_KEY;
         const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
         const today = new Date().toISOString().slice(0, 10);
-        // --- 语音处理专属指令 ---
-        const prompt = `请将下面的语音内容转换成文字，并从中提取日历事件信息。今天是 ${today}。
-你的任务：
-1.  **理解对话**：听懂语音内容，理解说话者的意图。
-2.  **提取关键信息**：找出事件的标题、开始时间（startDateTime）、结束时间（endDateTime）、地点（location）和任何备注（description）。
-3.  **格式化输出**：以 JSON 格式返回结果。将时间转换为不含时区信息的 ISO 8601 字符串（例如 "2025-09-15T14:30:00"）。例如："title": "和李医生预约", "startDateTime": "2025-09-15T14:30:00", "endDateTime": "N/A", "location": "市中心医院", "description": "带上体检报告。"。请直接返回 JSON 对象，不要包含 markdown 格式。`;
+        // --- 最终指令优化：更聚焦、更明确 ---
+        const prompt = `将语音内容转换为日历事件。今天是 ${today}。
+你的任务是：从语音中找出事件的标题、开始时间(startDateTime)、地点(location)和描述(description)。
+- **必须**将 "明天"、"下周一" 等相对时间转换为 'YYYY-MM-DDTHH:mm:ss' 格式。
+- 如果找不到某个信息，则将其值设为 "N/A"。
+- 直接以 JSON 对象格式返回，不要包含 markdown。
+例如，如果用户说“下周一下午两点和王医生在诊所有个复查”，你应该返回类似：
+{
+  "title": "与王医生复查",
+  "startDateTime": "2025-09-22T14:00:00",
+  "endDateTime": "N/A",
+  "location": "诊所",
+  "description": ""
+}`;
 
         const payload = {
             contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: req.file.mimetype, data: audioBase64 } }] }],
@@ -31,7 +39,6 @@ app.post('/api/create-event-from-voice', upload.single('eventAudio'), async (req
         const geminiResponse = await axios.post(geminiApiUrl, payload);
         const parsedEvent = JSON.parse(geminiResponse.data.candidates[0].content.parts[0].text);
         
-        // --- 新增的诊断日志 ---
         console.log('Gemini 语音识别原始结果:', JSON.stringify(parsedEvent, null, 2));
 
         if (parsedEvent.error) { throw new Error(parsedEvent.error); }
