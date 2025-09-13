@@ -1,4 +1,4 @@
-// ... (The beginning of the file is unchanged) ...
+// ... (All existing code from the beginning of the file) ...
 
 // --- 抽取的通用函数：创建日历事件 ---
 async function createCalendarEvent(req, res, parsedEvent) {
@@ -51,5 +51,18 @@ async function createCalendarEvent(req, res, parsedEvent) {
 }
 
 
-// ... (The rest of the file is unchanged) ...
+// ... (This section includes the routes: /auth/google, /auth/google/callback, etc. and remains unchanged) ...
+app.post('/api/create-event-from-voice', upload.single('eventAudio'), async (req, res) => {
+    // ... existing implementation
+});
+
+
+// --- 根路由 ---
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// --- 最终修复：恢复这一行关键代码 ---
+// --- 导出 app 供 Vercel 使用 ---
+module.exports = app;
 
