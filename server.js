@@ -4,8 +4,7 @@ const { google } = require('googleapis');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
-const session = require('express-session');
-const FileStore = require('session-file-store')(session); // 引入 session-file-store
+const cookieSession = require('cookie-session'); // 替换为 cookie-session
 require('dotenv').config();
 
 // --- 应用程序设置 ---
@@ -31,21 +30,14 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- Session 配置 (使用 FileStore) ---
+// --- Cookie-Session 配置 (最终解决方案) ---
 app.use(
-  session({
-    store: new FileStore({
-        path: '/tmp/sessions', // Vercel 推荐的临时文件存储路径
-        logFn: function(){} // 禁用不必要的日志
-    }),
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: {
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // session 有效期 24 小时
-    },
+  cookieSession({
+    name: 'easyappointment-session',
+    secret: process.env.SESSION_SECRET, // 用于加密 cookie
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // session 有效期 24 小时
   })
 );
 
@@ -74,12 +66,9 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    req.session.tokens = tokens;
-    // 手动保存 session，确保在重定向前完成写入
-    req.session.save(() => {
-        console.log('成功获取 Token 并存入 FileStore Session');
-        res.redirect('/?loginsuccess=true');
-    });
+    req.session.tokens = tokens; // 将 token 直接存入加密的 cookie
+    console.log('成功获取 Token 并存入 Cookie Session');
+    res.redirect('/?loginsuccess=true');
   } catch (error) {
     console.error('获取 Token 时出错:', error);
     res.status(500).send('授权失败');
