@@ -1,7 +1,7 @@
 {
   "name": "ai-calendar-assistant",
   "version": "1.0.0",
-  "description": "Upload an image to create a Google Calendar event.",
+  "description": "An intelligent assistant to create Google Calendar events from images.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
