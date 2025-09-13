@@ -98,7 +98,8 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
-    const prompt = `从图片中提取日历事件信息。今天是 ${today}。以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location"。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
+    // --- 优化：在 Prompt 中加入日期格式提示 ---
+    const prompt = `从图片中提取日历事件信息。今天是 ${today}。图片中的日期格式很可能是 DD/MM/YYYY，请据此解析。以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location"。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
     
     const payload = {
       contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: req.file.mimetype, data: imageBase64 } }] }],
@@ -155,4 +156,5 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
