@@ -4,7 +4,6 @@ const { google } = require('googleapis');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs'); // 引入 Node.js 文件系统模块
 const cookieSession = require('cookie-session');
 require('dotenv').config();
 
@@ -21,17 +20,19 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !proce
 }
 
 // --- 动态回调 URL ---
+// 仍然保留这个，因为它对于 OAuth 流程是必要的
 const redirectURL = process.env.PRODUCTION_URL
   ? `${process.env.PRODUCTION_URL}/auth/google/callback`
   : `http://localhost:${port}/auth/google/callback`;
 
 // --- 中间件 ---
 app.use(cors({
-    origin: process.env.PRODUCTION_URL || 'http://localhost:3001',
+    origin: process.env.PRODUCTION_URL, // 只允许来自您的生产 URL 的请求
     credentials: true
 }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// 简化：让 Express 自动服务 public 文件夹中的所有静态文件
+app.use(express.static(path.join(__dirname, 'public'))); 
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- Cookie-Session 配置 ---
@@ -190,19 +191,8 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
   }
 });
 
-// --- 根路由，服务于前端 (注入 API URL) ---
-app.get('/', (req, res) => {
-    const filePath = path.join(__dirname, 'public', 'index.html');
-    fs.readFile(filePath, 'utf8', (err, data) => {
-        if (err) {
-            return res.status(500).send('加载页面时出错。');
-        }
-        // 将占位符替换为真实的 API URL
-        const apiUrl = process.env.PRODUCTION_URL || `http://localhost:${port}`;
-        const modifiedHtml = data.replace('__API_URL_PLACEHOLDER__', apiUrl);
-        res.send(modifiedHtml);
-    });
-});
+
+// 移除自定义的 app.get('/') 路由，让 express.static 处理
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
