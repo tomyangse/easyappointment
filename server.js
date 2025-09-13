@@ -61,8 +61,8 @@ app.get('/auth/google/callback', async (req, res) => {
     oauth2Client.setCredentials(tokens);
     userTokens['currentUser'] = tokens;
     console.log('成功获取 Token');
-    // 授权成功后，重定向回应用的首页
-    res.redirect('/');
+    // 授权成功后，重定向回应用的首页，并附带一个成功标志
+    res.redirect('/?loginsuccess=true');
   } catch (error) {
     console.error('获取 Token 时出错:', error);
     res.status(500).send('授权失败');
@@ -130,5 +130,6 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
 
