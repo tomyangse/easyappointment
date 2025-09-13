@@ -98,12 +98,13 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
-    // --- 终极优化 V2：“侦探模式”指令 ---
+    // --- 终极优化 V3：“时区专家”指令 ---
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。
-你的任务分三步：
-1.  **判断主要语言和地区**：分析图片中的所有文本，确定其主要语言。如果语言是英语，请根据地点、地址、电话号码、货币符号（如 £, $）或拼写（如 colour vs color）来判断是哪个地区（例如美国、英国、澳大利亚等）。
+你的任务分四步：
+1.  **判断主要语言和地区**：分析图片中的所有文本，确定其主要语言和地理位置（例如城市或国家）。
 2.  **根据地区解析日期**：使用该地区最常见的日期格式来解析日期。例如：对美式英语，使用 MM/DD/YYYY；对英式英语、澳大利亚英语和多数欧洲语言，使用 DD/MM/YYYY。
-3.  **设定备用规则**：如果无法确定具体地区，请优先使用 DD/MM/YYYY 格式，因为它在世界范围内更普遍。
+3.  **确定时区并格式化时间**：根据推断出的地理位置，确定其 IANA 时区（例如 'Europe/Madrid'）。将提取出的开始和结束时间，格式化为包含时区偏移量的完整 ISO 8601 字符串（例如 '2025-09-10T12:20:00+02:00'）。
+4.  **设定备用规则**：如果无法确定具体地区，请优先使用 DD/MM/YYYY 格式，并假设时区为 UTC (Z)。
 最后，以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location"。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
     
     const payload = {
@@ -138,8 +139,9 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const event = {
       summary: parsedEvent.title,
       location: parsedEvent.location,
-      start: { dateTime: parsedEvent.startDateTime, timeZone: 'Asia/Shanghai' },
-      end: { dateTime: endDateTime, timeZone: 'Asia/Shanghai' },
+      // 移除硬编码的时区，因为 AI 返回的 dateTime 字符串现在应该包含了时区信息
+      start: { dateTime: parsedEvent.startDateTime },
+      end: { dateTime: endDateTime },
     };
 
     console.log('正在创建 Google 日历事件...');
@@ -161,6 +163,7 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
 
 
