@@ -4,25 +4,22 @@ const { google } = require('googleapis');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+const session = require('express-session'); // 引入 session 中间件
 require('dotenv').config();
 
 // --- 应用程序设置 ---
 const app = express();
-// Vercel 会自动处理端口，但在本地开发时可能需要
 const port = process.env.PORT || 3001;
 
 // --- 环境变量检查 ---
-if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GEMINI_API_KEY) {
-    console.error("错误：缺少必要的环境变量。请检查您的 .env 文件或 Vercel 配置。");
-    // 在非 Vercel 环境下，正常退出
+if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GEMINI_API_KEY || !process.env.SESSION_SECRET) {
+    console.error("错误：缺少必要的环境变量。请检查您的 Vercel 配置。");
     if (!process.env.VERCEL) {
         process.exit(1);
     }
 }
 
-
 // --- 动态回调 URL ---
-// 生产环境中，使用明确设置的 PRODUCTION_URL，否则使用 localhost
 const redirectURL = process.env.PRODUCTION_URL
   ? `${process.env.PRODUCTION_URL}/auth/google/callback`
   : `http://localhost:${port}/auth/google/callback`;
@@ -30,8 +27,23 @@ const redirectURL = process.env.PRODUCTION_URL
 // --- 中间件 ---
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public'))); // 托管 public 文件夹中的静态文件
+app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage() });
+
+// --- Session 配置 ---
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET, // 用于签名 session ID cookie 的密钥
+    resave: false,
+    saveUninitialized: true,
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production', // 在生产环境中应使用 secure cookie
+        httpOnly: true, // 防止客户端脚本访问 cookie
+        maxAge: 24 * 60 * 60 * 1000 // session 有效期 24 小时
+    },
+  })
+);
+
 
 // --- Google OAuth 2.0 配置 ---
 const oauth2Client = new google.auth.OAuth2(
@@ -41,7 +53,6 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 const scopes = ['https://www.googleapis.com/auth/calendar'];
-const userTokens = {}; // 简单内存存储
 
 // --- API 路由 ---
 
@@ -49,6 +60,7 @@ app.get('/auth/google', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
+    prompt: 'consent' // 确保每次都请求刷新令牌
   });
   res.redirect(url);
 });
@@ -58,9 +70,9 @@ app.get('/auth/google/callback', async (req, res) => {
   try {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
-    userTokens['currentUser'] = tokens;
-    console.log('成功获取 Token');
-    // 授权成功后，重定向回应用的首页，并附带一个成功标志
+    // 将 token 存储在 session 中，而不是全局变量
+    req.session.tokens = tokens;
+    console.log('成功获取 Token 并存入 Session');
     res.redirect('/?loginsuccess=true');
   } catch (error) {
     console.error('获取 Token 时出错:', error);
@@ -69,7 +81,8 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.post('/api/create-event-from-image', upload.single('eventImage'), async (req, res) => {
-  if (!userTokens['currentUser']) {
+  // 从 session 中检查 token，而不是全局变量
+  if (!req.session.tokens) {
     return res.status(401).json({ message: '用户未授权。请刷新页面并重新登录。' });
   }
 
@@ -80,7 +93,6 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
   try {
     const imageBase64 = req.file.buffer.toString('base64');
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    // 修复：使用正确的、包含 '-latest' 标签的模型名称
     const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location"。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
@@ -100,15 +112,28 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
 
     if (parsedEvent.error) { throw new Error(parsedEvent.error); }
     console.log('Gemini 识别结果:', parsedEvent);
-
-    oauth2Client.setCredentials(userTokens['currentUser']);
+    
+    // 使用 session 中的 token 进行授权
+    oauth2Client.setCredentials(req.session.tokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
     
+    // --- 修复：处理 'N/A' 结束时间 ---
+    let endDateTime;
+    if (parsedEvent.endDateTime === 'N/A' || !parsedEvent.endDateTime) {
+        // 如果结束时间无效，则默认设置为开始时间后 1 小时
+        const startDate = new Date(parsedEvent.startDateTime);
+        startDate.setHours(startDate.getHours() + 1);
+        endDateTime = startDate.toISOString();
+        console.log(`未找到结束时间，已自动设置为: ${endDateTime}`);
+    } else {
+        endDateTime = parsedEvent.endDateTime;
+    }
+
     const event = {
       summary: parsedEvent.title,
       location: parsedEvent.location,
       start: { dateTime: parsedEvent.startDateTime, timeZone: 'Asia/Shanghai' },
-      end: { dateTime: parsedEvent.endDateTime, timeZone: 'Asia/Shanghai' },
+      end: { dateTime: endDateTime, timeZone: 'Asia/Shanghai' }, // 使用处理过的结束时间
     };
 
     console.log('正在创建 Google 日历事件...');
@@ -130,4 +155,5 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
