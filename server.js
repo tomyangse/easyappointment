@@ -25,21 +25,25 @@ const redirectURL = process.env.PRODUCTION_URL
   : `http://localhost:${port}/auth/google/callback`;
 
 // --- 中间件 ---
-app.use(cors());
+// 注意：CORS 配置需要更精细，以允许凭证
+app.use(cors({
+    origin: process.env.PRODUCTION_URL || 'http://localhost:3001',
+    credentials: true
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- Cookie-Session 配置 ---
-app.set('trust proxy', 1); // 在 Vercel 这样的代理环境下需要此设置
+app.set('trust proxy', 1);
 app.use(
   cookieSession({
     name: 'easyappointment-session',
     secret: process.env.SESSION_SECRET,
     httpOnly: true,
-    secure: true, // 强制要求 HTTPS
-    sameSite: 'lax', // 增强安全性
-    maxAge: 24 * 60 * 60 * 1000
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000 // 将 Cookie 有效期延长至 30 天
   })
 );
 
@@ -57,9 +61,9 @@ const scopes = ['https://www.googleapis.com/auth/calendar.readonly', 'https://ww
 
 app.get('/auth/google', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
+    access_type: 'offline', // 关键：请求 refresh_token
     scope: scopes,
-    prompt: 'consent'
+    prompt: 'consent' // 确保每次都征求同意以获取 refresh_token
   });
   res.redirect(url);
 });
@@ -68,8 +72,9 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const { tokens } = await oauth2Client.getToken(code);
+    // 同时存储 access_token 和 refresh_token
     req.session.tokens = tokens;
-    console.log('成功获取 Token 并存入 Cookie Session');
+    console.log('成功获取 Token (包含 Refresh Token) 并存入 Cookie Session');
     res.redirect('/?loginsuccess=true');
   } catch (error) {
     console.error('获取 Token 时出错:', error);
@@ -77,7 +82,46 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 });
 
+// --- 新增：检查用户登录状态的 API ---
+app.get('/api/check-auth', async (req, res) => {
+    if (req.session && req.session.tokens) {
+        // 如果 session 中有 token，我们尝试用它来验证
+        try {
+            // 如果存在 refresh_token，就用它来获取新的 access_token
+            if (req.session.tokens.refresh_token) {
+                oauth2Client.setCredentials({
+                    refresh_token: req.session.tokens.refresh_token
+                });
+                // 获取新的 access_token
+                const { credentials } = await oauth2Client.refreshAccessToken();
+                // 更新 session 中的 token 信息
+                req.session.tokens = {
+                    ...req.session.tokens, // 保留原有的 refresh_token
+                    ...credentials // 更新 access_token 和 expiry_date
+                };
+                 console.log('通过 Refresh Token 刷新 Access Token 成功');
+                res.json({ loggedIn: true });
+            } else {
+                 // 如果没有 refresh_token (例如用户之前登录过)，检查 access_token 是否仍然有效
+                 oauth2Client.setCredentials(req.session.tokens);
+                 // 尝试调用一个简单的 API 来验证 token
+                 await calendar.settings.get({ setting: 'timezone' });
+                 res.json({ loggedIn: true });
+            }
+        } catch (error) {
+            console.log('Token 无效或已过期, 需要重新登录:', error.message);
+            // 清除无效的 session
+            req.session = null;
+            res.json({ loggedIn: false });
+        }
+    } else {
+        res.json({ loggedIn: false });
+    }
+});
+
+
 app.post('/api/create-event-from-image', upload.single('eventImage'), async (req, res) => {
+  // ... (此部分代码无需改动) ...
   if (!req.session || !req.session.tokens) {
     return res.status(401).json({ message: '用户未授权。请刷新页面并重新登录。' });
   }
@@ -91,7 +135,6 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
-    // --- 简化版 Prompt：不再推断时区 ---
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。
 请先判断图片中的主要语言，然后根据该语言最常见的日期格式（例如，对西班牙语和多数欧洲语言使用 DD/MM/YYYY，对美式英语使用 MM/DD/YYYY）来解析日期。
 将开始和结束时间格式化为不含时区信息的 ISO 8601 字符串（例如 '2025-09-10T12:20:00'）。
@@ -116,19 +159,17 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     oauth2Client.setCredentials(req.session.tokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
-    // --- 新增：获取用户的日历默认时区 ---
     console.log('正在获取用户日历的默认时区...');
     const settings = await calendar.settings.get({ setting: 'timezone' });
     const userTimezone = settings.data.value;
     console.log(`获取成功，用户时区为: ${userTimezone}`);
     
     let endDateTime;
-    // 注意：这里的 new Date() 会使用服务器的本地时间解析，但因为我们最后会指定时区，所以没问题
     const startDate = new Date(parsedEvent.startDateTime); 
 
     if (parsedEvent.endDateTime === 'N/A' || !parsedEvent.endDateTime) {
         startDate.setHours(startDate.getHours() + 1);
-        endDateTime = startDate.toISOString().slice(0, 19); // 移除 Z
+        endDateTime = startDate.toISOString().slice(0, 19);
     } else {
         endDateTime = parsedEvent.endDateTime;
     }
@@ -138,11 +179,11 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
       location: parsedEvent.location,
       start: { 
         dateTime: parsedEvent.startDateTime, 
-        timeZone: userTimezone // 使用用户的时区
+        timeZone: userTimezone
       },
       end: { 
         dateTime: endDateTime, 
-        timeZone: userTimezone // 使用用户的时区
+        timeZone: userTimezone
       },
     };
 
