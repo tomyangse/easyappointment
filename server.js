@@ -4,6 +4,7 @@ const { google } = require('googleapis');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs'); // 引入 Node.js 文件系统模块
 const cookieSession = require('cookie-session');
 require('dotenv').config();
 
@@ -25,7 +26,6 @@ const redirectURL = process.env.PRODUCTION_URL
   : `http://localhost:${port}/auth/google/callback`;
 
 // --- 中间件 ---
-// 注意：CORS 配置需要更精细，以允许凭证
 app.use(cors({
     origin: process.env.PRODUCTION_URL || 'http://localhost:3001',
     credentials: true
@@ -43,7 +43,7 @@ app.use(
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000 // 将 Cookie 有效期延长至 30 天
+    maxAge: 30 * 24 * 60 * 60 * 1000
   })
 );
 
@@ -61,9 +61,9 @@ const scopes = ['https://www.googleapis.com/auth/calendar.readonly', 'https://ww
 
 app.get('/auth/google', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline', // 关键：请求 refresh_token
+    access_type: 'offline',
     scope: scopes,
-    prompt: 'consent' // 确保每次都征求同意以获取 refresh_token
+    prompt: 'consent'
   });
   res.redirect(url);
 });
@@ -72,7 +72,6 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    // 同时存储 access_token 和 refresh_token
     req.session.tokens = tokens;
     console.log('成功获取 Token (包含 Refresh Token) 并存入 Cookie Session');
     res.redirect('/?loginsuccess=true');
@@ -82,35 +81,28 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 });
 
-// --- 新增：检查用户登录状态的 API ---
 app.get('/api/check-auth', async (req, res) => {
     if (req.session && req.session.tokens) {
-        // 如果 session 中有 token，我们尝试用它来验证
         try {
-            // 如果存在 refresh_token，就用它来获取新的 access_token
             if (req.session.tokens.refresh_token) {
                 oauth2Client.setCredentials({
                     refresh_token: req.session.tokens.refresh_token
                 });
-                // 获取新的 access_token
                 const { credentials } = await oauth2Client.refreshAccessToken();
-                // 更新 session 中的 token 信息
                 req.session.tokens = {
-                    ...req.session.tokens, // 保留原有的 refresh_token
-                    ...credentials // 更新 access_token 和 expiry_date
+                    ...req.session.tokens,
+                    ...credentials
                 };
                  console.log('通过 Refresh Token 刷新 Access Token 成功');
                 res.json({ loggedIn: true });
             } else {
-                 // 如果没有 refresh_token (例如用户之前登录过)，检查 access_token 是否仍然有效
                  oauth2Client.setCredentials(req.session.tokens);
-                 // 尝试调用一个简单的 API 来验证 token
+                 const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
                  await calendar.settings.get({ setting: 'timezone' });
                  res.json({ loggedIn: true });
             }
         } catch (error) {
             console.log('Token 无效或已过期, 需要重新登录:', error.message);
-            // 清除无效的 session
             req.session = null;
             res.json({ loggedIn: false });
         }
@@ -121,7 +113,6 @@ app.get('/api/check-auth', async (req, res) => {
 
 
 app.post('/api/create-event-from-image', upload.single('eventImage'), async (req, res) => {
-  // ... (此部分代码无需改动) ...
   if (!req.session || !req.session.tokens) {
     return res.status(401).json({ message: '用户未授权。请刷新页面并重新登录。' });
   }
@@ -199,9 +190,18 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
   }
 });
 
-// --- 根路由，服务于前端 ---
+// --- 根路由，服务于前端 (注入 API URL) ---
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    const filePath = path.join(__dirname, 'public', 'index.html');
+    fs.readFile(filePath, 'utf8', (err, data) => {
+        if (err) {
+            return res.status(500).send('加载页面时出错。');
+        }
+        // 将占位符替换为真实的 API URL
+        const apiUrl = process.env.PRODUCTION_URL || `http://localhost:${port}`;
+        const modifiedHtml = data.replace('__API_URL_PLACEHOLDER__', apiUrl);
+        res.send(modifiedHtml);
+    });
 });
 
 // --- 导出 app 供 Vercel 使用 ---
