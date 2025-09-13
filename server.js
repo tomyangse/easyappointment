@@ -125,7 +125,7 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
-    // --- 恢复最终的、最智能的 AI 指令 ---
+    // --- 图片处理指令 ---
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。
 你的任务分五步：
 1.  **总结事件标题**：根据图片内容，生成一个简洁、概括性的事件标题（例如“与张三的会议”或“牙医预约”）。
@@ -139,17 +139,62 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
       generationConfig: { "responseMimeType": "application/json" }
     };
     
-    console.log('正在调用 Gemini API...');
+    console.log('正在调用 Gemini API 处理图片...');
     const geminiResponse = await axios.post(geminiApiUrl, payload);
-
-    if (!geminiResponse.data.candidates || !geminiResponse.data.candidates[0].content.parts[0].text) {
-        throw new Error("Gemini API 返回了无效的响应。");
-    }
     const parsedEvent = JSON.parse(geminiResponse.data.candidates[0].content.parts[0].text);
-
     if (parsedEvent.error) { throw new Error(parsedEvent.error); }
-    console.log('Gemini 识别结果:', parsedEvent);
     
+    await createCalendarEvent(req, res, parsedEvent);
+
+  } catch (error) {
+    console.error('处理图片过程中发生错误:', error.response ? error.response.data : error.message);
+    res.status(500).json({ message: '服务器处理图片失败', error: error.message });
+  }
+});
+
+// --- 新增：处理语音输入的 API 接口 ---
+app.post('/api/create-event-from-voice', upload.single('eventAudio'), async (req, res) => {
+    if (!req.session || !req.session.tokens) {
+        return res.status(401).json({ message: '用户未授权。请刷新页面并重新登录。' });
+    }
+
+    if (!req.file) {
+        return res.status(400).json({ message: '未找到上传的语音。' });
+    }
+
+    try {
+        const audioBase64 = req.file.buffer.toString('base64');
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
+        const today = new Date().toISOString().slice(0, 10);
+        // --- 语音处理专属指令 ---
+        const prompt = `请将下面的语音内容转换成文字，并从中提取日历事件信息。今天是 ${today}。
+你的任务：
+1.  **理解对话**：听懂语音内容，理解说话者的意图。
+2.  **提取关键信息**：找出事件的标题、开始时间（startDateTime）、结束时间（endDateTime）、地点（location）和任何备注（description）。
+3.  **格式化输出**：以 JSON 格式返回结果。例如："title": "和李医生预约", "startDateTime": "2025-09-15T14:30:00", "endDateTime": "N/A", "location": "市中心医院", "description": "带上体检报告。"。请直接返回 JSON 对象，不要包含 markdown 格式。`;
+
+        const payload = {
+            contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: req.file.mimetype, data: audioBase64 } }] }],
+            generationConfig: { "responseMimeType": "application/json" }
+        };
+
+        console.log('正在调用 Gemini API 处理语音...');
+        const geminiResponse = await axios.post(geminiApiUrl, payload);
+        const parsedEvent = JSON.parse(geminiResponse.data.candidates[0].content.parts[0].text);
+        if (parsedEvent.error) { throw new Error(parsedEvent.error); }
+
+        await createCalendarEvent(req, res, parsedEvent);
+
+    } catch (error) {
+        console.error('处理语音过程中发生错误:', error.response ? error.response.data : error.message);
+        res.status(500).json({ message: '服务器处理语音失败', error: error.message });
+    }
+});
+
+
+// --- 抽取的通用函数：创建日历事件 ---
+async function createCalendarEvent(req, res, parsedEvent) {
     oauth2Client.setCredentials(req.session.tokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
@@ -159,7 +204,14 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     console.log(`获取成功，用户时区为: ${userTimezone}`);
     
     let endDateTime;
-    const startDate = new Date(parsedEvent.startDateTime); 
+    // 确保 startDateTime 是有效字符串再创建 Date 对象
+    const startDate = parsedEvent.startDateTime && parsedEvent.startDateTime !== 'N/A' 
+        ? new Date(parsedEvent.startDateTime)
+        : new Date(); // 如果没有开始时间，则使用当前时间作为备用
+
+    if (parsedEvent.startDateTime === 'N/A') {
+        throw new Error("AI未能识别出有效的开始时间。");
+    }
 
     if (parsedEvent.endDateTime === 'N/A' || !parsedEvent.endDateTime) {
         startDate.setHours(startDate.getHours() + 1);
@@ -187,14 +239,10 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
 
     console.log('日历事件创建成功!');
     res.status(200).json({ message: '日历事件创建成功！', eventLink: calendarResponse.data.htmlLink });
+}
 
-  } catch (error) {
-    console.error('处理过程中发生错误:', error.response ? error.response.data : error.message);
-    res.status(500).json({ message: '服务器处理失败', error: error.message });
-  }
-});
 
-// --- 根路由，服务于前端 ---
+// --- 根路由 ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
