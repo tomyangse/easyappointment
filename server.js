@@ -20,19 +20,17 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !proce
 }
 
 // --- 动态回调 URL ---
-// 仍然保留这个，因为它对于 OAuth 流程是必要的
 const redirectURL = process.env.PRODUCTION_URL
   ? `${process.env.PRODUCTION_URL}/auth/google/callback`
   : `http://localhost:${port}/auth/google/callback`;
 
 // --- 中间件 ---
 app.use(cors({
-    origin: process.env.PRODUCTION_URL, // 只允许来自您的生产 URL 的请求
+    origin: process.env.PRODUCTION_URL || 'http://localhost:3001',
     credentials: true
 }));
 app.use(express.json());
-// 简化：让 Express 自动服务 public 文件夹中的所有静态文件
-app.use(express.static(path.join(__dirname, 'public'))); 
+app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- Cookie-Session 配置 ---
@@ -125,12 +123,16 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
   try {
     const imageBase64 = req.file.buffer.toString('base64');
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
+    const geminiApiUrl = `https://generativelaunguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
+    // --- 终极优化 V4：“信息整合专家”指令 ---
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。
-请先判断图片中的主要语言，然后根据该语言最常见的日期格式（例如，对西班牙语和多数欧洲语言使用 DD/MM/YYYY，对美式英语使用 MM/DD/YYYY）来解析日期。
-将开始和结束时间格式化为不含时区信息的 ISO 8601 字符串（例如 '2025-09-10T12:20:00'）。
-最后，以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location"。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
+你的任务分五步：
+1.  **总结事件标题**：根据图片内容，生成一个简洁、概括性的事件标题（例如“与张三的会议”或“牙医预约”）。
+2.  **判断主要语言和地区**：分析图片中的所有文本，确定其主要语言和地理位置。
+3.  **根据地区解析日期**：使用该地区最常见的日期格式来解析日期。
+4.  **提取联系方式和备注**：识别图片中的联系人姓名、电话号码、邮箱或任何其他备注信息。
+5.  **格式化输出**：以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location", "description"。将步骤4中提取的联系方式和备注整理后放入 "description" 字段。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
     
     const payload = {
       contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: req.file.mimetype, data: imageBase64 } }] }],
@@ -169,6 +171,7 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const event = {
       summary: parsedEvent.title,
       location: parsedEvent.location,
+      description: parsedEvent.description, // 将提取出的备注信息添加到说明中
       start: { 
         dateTime: parsedEvent.startDateTime, 
         timeZone: userTimezone
@@ -191,8 +194,10 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
   }
 });
 
-
-// 移除自定义的 app.get('/') 路由，让 express.static 处理
+// --- 根路由，服务于前端 ---
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
