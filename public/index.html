@@ -54,20 +54,14 @@
     const loader = document.getElementById('loader');
     const statusMessage = document.getElementById('status-message');
     let selectedFile = null;
-
-    // 页面加载时检查是否已登录 (通过一个简单的标志)
-    // 真实的检查应更复杂，但对于此应用，如果用户刷新，需要重新登录。
-    // 这里我们假设每次加载都需要登录。
     
     loginBtn.addEventListener('click', () => {
         // 重定向到后端的授权 URL
         window.location.href = '/auth/google';
     });
 
-    // 模拟检查登录状态，显示上传界面
-    // 在真实应用中，你应该从服务器端验证 session 或 token
-    // 这里我们通过检查 URL 是否包含来自 Google 回调的 'code' 来简单判断
-    if (new URLSearchParams(window.location.search).has('code')) {
+    // 检查 URL 是否包含来自服务器的 'loginsuccess' 标志
+    if (new URLSearchParams(window.location.search).has('loginsuccess')) {
         loginSection.classList.add('hidden');
         uploadSection.classList.remove('hidden');
         statusMessage.textContent = '授权成功！请上传图片。';
@@ -129,3 +123,4 @@
 </script>
 </body>
 </html>
+
