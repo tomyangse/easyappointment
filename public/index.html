@@ -56,19 +56,15 @@
     let selectedFile = null;
     
     loginBtn.addEventListener('click', () => {
-        // 重定向到后端的授权 URL
         window.location.href = '/auth/google';
     });
 
-    // 等待整个 HTML 文档加载完成后再执行
     document.addEventListener('DOMContentLoaded', () => {
-        // 检查 URL 是否包含来自服务器的 'loginsuccess' 标志
         if (new URLSearchParams(window.location.search).has('loginsuccess')) {
             loginSection.classList.add('hidden');
             uploadSection.classList.remove('hidden');
             statusMessage.textContent = '授权成功！请上传图片。';
         } else {
-            // 默认显示登录按钮
             loginSection.classList.remove('hidden');
             uploadSection.classList.add('hidden');
         }
@@ -99,26 +95,31 @@
         statusMessage.textContent = '正在上传和识别图片...';
         submitBtn.disabled = true;
 
-        const formData = new FormData();
-        formData.append('eventImage', selectedFile);
-
         try {
+            const formData = new FormData();
+            formData.append('eventImage', selectedFile);
+
             const response = await fetch('/api/create-event-from-image', {
                 method: 'POST',
+                credentials: 'include',
                 body: formData,
             });
 
             const result = await response.json();
 
             if (!response.ok) {
-                throw new Error(result.message || '创建失败');
+                // 如果服务器返回错误 (如 401, 500), 抛出错误
+                throw new Error(result.message || '未知服务器错误');
             }
-            
-            statusMessage.innerHTML = `成功！🎉 <a href="${result.eventLink}" target="_blank" class="text-blue-600 underline">点击查看日历事件</a>`;
+
+            statusMessage.innerHTML = `成功！事件已创建。 <a href="${result.eventLink}" target="_blank" class="text-blue-500 hover:underline">点击查看</a>`;
+            submitBtn.classList.add('hidden'); // 成功后隐藏按钮
 
         } catch (error) {
+            console.error('上传或处理失败:', error);
             statusMessage.textContent = `错误: ${error.message}`;
         } finally {
+            // 无论成功或失败，都隐藏加载动画并恢复按钮
             loader.classList.add('hidden');
             submitBtn.disabled = false;
         }
@@ -126,5 +127,4 @@
 </script>
 </body>
 </html>
-
 
