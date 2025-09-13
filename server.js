@@ -23,9 +23,9 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !proce
 
 
 // --- 动态回调 URL ---
-// Vercel 部署时，使用 Vercel 提供的 URL，否则使用 localhost
-const redirectURL = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}/auth/google/callback`
+// 生产环境中，使用明确设置的 PRODUCTION_URL，否则使用 localhost
+const redirectURL = process.env.PRODUCTION_URL
+  ? `${process.env.PRODUCTION_URL}/auth/google/callback`
   : `http://localhost:${port}/auth/google/callback`;
 
 // --- 中间件 ---
@@ -130,4 +130,5 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
