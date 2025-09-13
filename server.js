@@ -51,7 +51,7 @@ const oauth2Client = new google.auth.OAuth2(
   redirectURL
 );
 
-const scopes = ['https://www.googleapis.com/auth/calendar'];
+const scopes = ['https://www.googleapis.com/auth/calendar.readonly', 'https://www.googleapis.com/auth/calendar.events'];
 
 // --- API 路由 ---
 
@@ -78,14 +78,7 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.post('/api/create-event-from-image', upload.single('eventImage'), async (req, res) => {
-  // --- 新增的详细诊断日志 ---
-  console.log('--- 开始处理 /api/create-event-from-image 请求 ---');
-  console.log('请求头中的 Cookie:', req.headers.cookie || '未找到 Cookie');
-  console.log('解析后的 Session 对象:', JSON.stringify(req.session, null, 2));
-  // --- 诊断日志结束 ---
-
   if (!req.session || !req.session.tokens) {
-    console.error('授权检查失败：Session 中未找到 tokens。');
     return res.status(401).json({ message: '用户未授权。请刷新页面并重新登录。' });
   }
 
@@ -98,13 +91,10 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
-    // --- 终极优化 V3：“时区专家”指令 ---
+    // --- 简化版 Prompt：不再推断时区 ---
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。
-你的任务分四步：
-1.  **判断主要语言和地区**：分析图片中的所有文本，确定其主要语言和地理位置（例如城市或国家）。
-2.  **根据地区解析日期**：使用该地区最常见的日期格式来解析日期。例如：对美式英语，使用 MM/DD/YYYY；对英式英语、澳大利亚英语和多数欧洲语言，使用 DD/MM/YYYY。
-3.  **确定时区并格式化时间**：根据推断出的地理位置，确定其 IANA 时区（例如 'Europe/Madrid'）。将提取出的开始和结束时间，格式化为包含时区偏移量的完整 ISO 8601 字符串（例如 '2025-09-10T12:20:00+02:00'）。
-4.  **设定备用规则**：如果无法确定具体地区，请优先使用 DD/MM/YYYY 格式，并假设时区为 UTC (Z)。
+请先判断图片中的主要语言，然后根据该语言最常见的日期格式（例如，对西班牙语和多数欧洲语言使用 DD/MM/YYYY，对美式英语使用 MM/DD/YYYY）来解析日期。
+将开始和结束时间格式化为不含时区信息的 ISO 8601 字符串（例如 '2025-09-10T12:20:00'）。
 最后，以 JSON 格式返回结果，包含字段："title", "startDateTime", "endDateTime", "location"。如果信息不完整，值设为 "N/A"。如果无法识别，返回 {"error": "未找到事件信息"}。请直接返回 JSON 对象，不要包含 markdown 格式。`;
     
     const payload = {
@@ -125,13 +115,20 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     
     oauth2Client.setCredentials(req.session.tokens);
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    // --- 新增：获取用户的日历默认时区 ---
+    console.log('正在获取用户日历的默认时区...');
+    const settings = await calendar.settings.get({ setting: 'timezone' });
+    const userTimezone = settings.data.value;
+    console.log(`获取成功，用户时区为: ${userTimezone}`);
     
     let endDateTime;
+    // 注意：这里的 new Date() 会使用服务器的本地时间解析，但因为我们最后会指定时区，所以没问题
+    const startDate = new Date(parsedEvent.startDateTime); 
+
     if (parsedEvent.endDateTime === 'N/A' || !parsedEvent.endDateTime) {
-        const startDate = new Date(parsedEvent.startDateTime);
         startDate.setHours(startDate.getHours() + 1);
-        endDateTime = startDate.toISOString();
-        console.log(`未找到结束时间，已自动设置为: ${endDateTime}`);
+        endDateTime = startDate.toISOString().slice(0, 19); // 移除 Z
     } else {
         endDateTime = parsedEvent.endDateTime;
     }
@@ -139,9 +136,14 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
     const event = {
       summary: parsedEvent.title,
       location: parsedEvent.location,
-      // 移除硬编码的时区，因为 AI 返回的 dateTime 字符串现在应该包含了时区信息
-      start: { dateTime: parsedEvent.startDateTime },
-      end: { dateTime: endDateTime },
+      start: { 
+        dateTime: parsedEvent.startDateTime, 
+        timeZone: userTimezone // 使用用户的时区
+      },
+      end: { 
+        dateTime: endDateTime, 
+        timeZone: userTimezone // 使用用户的时区
+      },
     };
 
     console.log('正在创建 Google 日历事件...');
@@ -163,8 +165,4 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
-
-
-
-
 
