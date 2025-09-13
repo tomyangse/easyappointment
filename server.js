@@ -242,6 +242,14 @@ async function createCalendarEvent(req, res, parsedEvent) {
         dateTime: endDateTime, 
         timeZone: userTimezone
       },
+      // --- 新增：设置自定义提醒 ---
+      reminders: {
+        useDefault: false, // 不使用用户的默认提醒
+        overrides: [
+          { method: 'popup', minutes: 24 * 60 }, // 提前 1 天提醒 (弹窗通知)
+          { method: 'popup', minutes: 60 },        // 提前 1 小时提醒 (弹窗通知)
+        ],
+      },
     };
 
     console.log('正在创建 Google 日历事件...');
