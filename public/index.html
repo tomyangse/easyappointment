@@ -60,16 +60,19 @@
         window.location.href = '/auth/google';
     });
 
-    // 检查 URL 是否包含来自服务器的 'loginsuccess' 标志
-    if (new URLSearchParams(window.location.search).has('loginsuccess')) {
-        loginSection.classList.add('hidden');
-        uploadSection.classList.remove('hidden');
-        statusMessage.textContent = '授权成功！请上传图片。';
-    } else {
-        // 默认显示登录按钮
-        loginSection.classList.remove('hidden');
-        uploadSection.classList.add('hidden');
-    }
+    // 等待整个 HTML 文档加载完成后再执行
+    document.addEventListener('DOMContentLoaded', () => {
+        // 检查 URL 是否包含来自服务器的 'loginsuccess' 标志
+        if (new URLSearchParams(window.location.search).has('loginsuccess')) {
+            loginSection.classList.add('hidden');
+            uploadSection.classList.remove('hidden');
+            statusMessage.textContent = '授权成功！请上传图片。';
+        } else {
+            // 默认显示登录按钮
+            loginSection.classList.remove('hidden');
+            uploadSection.classList.add('hidden');
+        }
+    });
 
     uploadBtn.addEventListener('click', () => imageUploader.click());
     
@@ -123,4 +126,5 @@
 </script>
 </body>
 </html>
+
 
