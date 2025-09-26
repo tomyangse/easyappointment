@@ -168,7 +168,7 @@ app.post('/api/create-event-from-voice', upload.single('eventAudio'), async (req
     try {
         const audioBase64 = req.file.buffer.toString('base64');
         const geminiApiKey = process.env.GEMINI_API_KEY;
-        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
+        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
         const today = new Date().toISOString().slice(0, 10);
         const prompt = `将语音内容转换为日历事件。今天是 ${today}。
 你的任务是：从语音中找出事件的标题、开始时间(startDateTime)、地点(location)和描述(description)。
@@ -267,4 +267,5 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
