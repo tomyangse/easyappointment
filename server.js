@@ -123,7 +123,7 @@ app.post('/api/create-event-from-image', upload.single('eventImage'), async (req
   try {
     const imageBase64 = req.file.buffer.toString('base64');
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`;
+    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
     const today = new Date().toISOString().slice(0, 10);
     const prompt = `从图片中提取日历事件信息。今天是 ${today}。
 你的任务分五步：
@@ -267,5 +267,6 @@ app.get('/', (req, res) => {
 
 // --- 导出 app 供 Vercel 使用 ---
 module.exports = app;
+
 
 
